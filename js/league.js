@@ -41,15 +41,15 @@ function buildFixtures(teamIds) {
   );
   const allRounds = [...firstLeg, ...secondLeg];
 
-  return allRounds.map((round) =>
-    round.map(([home, away]) => ({
+  return allRounds.map((round) => ({
+    matches: round.map(([home, away]) => ({
       home,
       away,
       played: false,
       homeGoals: null,
       awayGoals: null,
-    }))
-  );
+    })),
+  }));
 }
 
 export async function createLeague(uid, clubName, clubStrengthFallback = 45) {
@@ -87,7 +87,7 @@ export function computeStandings(league) {
   }
 
   for (const round of league.fixtures) {
-    for (const m of round) {
+    for (const m of round.matches) {
       if (!m.played) continue;
       const home = table[m.home];
       const away = table[m.away];
@@ -110,7 +110,7 @@ export function computeStandings(league) {
 
 export function getNextMatchday(league) {
   if (league.currentMatchday >= league.totalMatchdays) return null;
-  return league.fixtures[league.currentMatchday];
+  return league.fixtures[league.currentMatchday].matches;
 }
 
 // ----------------------------------------------------------------------------
@@ -122,7 +122,7 @@ export async function simulateCurrentMatchday(uid, league, yourStrength) {
   const idx = league.currentMatchday;
   if (idx >= league.totalMatchdays) throw new Error("La liga ya terminó.");
 
-  const round = league.fixtures[idx];
+  const round = league.fixtures[idx].matches;
   let yourMatch = null;
 
   const updatedRound = round.map((m) => {
@@ -153,7 +153,7 @@ export async function simulateCurrentMatchday(uid, league, yourStrength) {
   });
 
   const newFixtures = league.fixtures.slice();
-  newFixtures[idx] = updatedRound;
+  newFixtures[idx] = { matches: updatedRound };
 
   const newLeague = {
     ...league,
