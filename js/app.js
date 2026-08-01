@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { auth, onAuthStateChanged } from "./firebase-config.js";
-import { registerClub, loginClub, logoutClub, getClubDoc, translateAuthError } from "./auth.js";
+import { signInWithGoogle, logoutClub, getClubDoc, createClub, translateAuthError } from "./auth.js";
 import { ensurePlayersSeeded, fetchFreeAgents, fetchRoster, buyPlayer, sellPlayer, formatMoney } from "./market.js";
 import { FORMATION_SLOTS, assignSlot, clearSlot, saveLineup, computeTeamStrength, rosterToMap } from "./team.js";
 import { createLeague, getLeague, computeStandings, getNextMatchday, simulateCurrentMatchday, YOU_ID } from "./league.js";
@@ -30,21 +30,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // AUTH
 // ============================================================================
 
-$("toggle-to-register").addEventListener("click", () => {
-  $("login-form").classList.add("hidden");
-  $("register-form").classList.remove("hidden");
-  $("toggle-to-register-wrap").classList.add("hidden");
-  $("toggle-to-login-wrap").classList.remove("hidden");
-  hideAuthError();
-});
-$("toggle-to-login").addEventListener("click", () => {
-  $("register-form").classList.add("hidden");
-  $("login-form").classList.remove("hidden");
-  $("toggle-to-login-wrap").classList.add("hidden");
-  $("toggle-to-register-wrap").classList.remove("hidden");
-  hideAuthError();
-});
-
 function showAuthError(msg) {
   const el = $("auth-error");
   el.textContent = msg;
@@ -54,27 +39,35 @@ function hideAuthError() {
   $("auth-error").classList.add("hidden");
 }
 
-$("login-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+$("google-signin-btn").addEventListener("click", async () => {
   hideAuthError();
+  const btn = $("google-signin-btn");
+  btn.disabled = true;
   try {
-    await loginClub($("login-email").value.trim(), $("login-password").value);
+    await signInWithGoogle();
+    // el resto del flujo lo maneja onAuthStateChanged
   } catch (err) {
     showAuthError(translateAuthError(err.code));
+  } finally {
+    btn.disabled = false;
   }
 });
 
-$("register-form").addEventListener("submit", async (e) => {
+$("setup-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  hideAuthError();
+  const clubName = $("setup-club").value.trim();
+  if (!clubName) return;
+
+  const submitBtn = e.target.querySelector("button[type=submit]");
+  submitBtn.disabled = true;
   try {
-    await registerClub(
-      $("reg-club").value.trim(),
-      $("reg-email").value.trim(),
-      $("reg-password").value
-    );
+    state.club = await createClub(state.user.uid, state.user.email, clubName);
+    $("setup-screen").classList.add("hidden");
+    $("main-screen").classList.remove("hidden");
+    await finishBootstrap();
   } catch (err) {
     showAuthError(translateAuthError(err.code));
+    submitBtn.disabled = false;
   }
 });
 
@@ -83,21 +76,32 @@ $("logout-btn").addEventListener("click", () => logoutClub());
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     state.user = user;
+    const existingClub = await getClubDoc(user.uid);
+
+    if (!existingClub) {
+      // Primera vez que este usuario entra: le pedimos nombre de club
+      $("auth-screen").classList.add("hidden");
+      $("setup-screen").classList.remove("hidden");
+      $("setup-club").value = "";
+      return;
+    }
+
+    state.club = existingClub;
     $("auth-screen").classList.add("hidden");
+    $("setup-screen").classList.add("hidden");
     $("main-screen").classList.remove("hidden");
-    await bootstrapClub();
+    await finishBootstrap();
   } else {
     state.user = null;
+    state.club = null;
     $("main-screen").classList.add("hidden");
+    $("setup-screen").classList.add("hidden");
     $("auth-screen").classList.remove("hidden");
-    $("login-form").reset();
-    $("register-form").reset();
   }
 });
 
-async function bootstrapClub() {
+async function finishBootstrap() {
   await ensurePlayersSeeded();
-  state.club = await getClubDoc(state.user.uid);
   state.roster = await fetchRoster(state.user.uid);
   state.rosterMap = rosterToMap(state.roster);
   state.league = await getLeague(state.user.uid);

@@ -1,14 +1,13 @@
 // ============================================================================
-// Auth — registro / login / logout + creación del "club" del usuario
+// Auth — login con Google + creación del "club" del usuario
 // ============================================================================
 
 import {
   auth,
   db,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut as fbSignOut,
-  updateProfile,
   doc,
   setDoc,
   getDoc,
@@ -26,23 +25,9 @@ export const EMPTY_LINEUP = {
   DEL: null,
 };
 
-export async function registerClub(clubName, email, password) {
-  const cred = await createUserWithEmailAndPassword(auth, email, password);
-  await updateProfile(cred.user, { displayName: clubName });
-
-  await setDoc(doc(db, "clubs", cred.user.uid), {
-    club: clubName,
-    email,
-    budget: STARTING_BUDGET,
-    lineup: EMPTY_LINEUP,
-    createdAt: serverTimestamp(),
-  });
-
-  return cred.user;
-}
-
-export async function loginClub(email, password) {
-  const cred = await signInWithEmailAndPassword(auth, email, password);
+export async function signInWithGoogle() {
+  const provider = new GoogleAuthProvider();
+  const cred = await signInWithPopup(auth, provider);
   return cred.user;
 }
 
@@ -55,17 +40,28 @@ export async function getClubDoc(uid) {
   return snap.exists() ? snap.data() : null;
 }
 
-// Traduce los códigos de error de Firebase Auth a mensajes en español,
-// para no mostrarle al usuario cosas como "auth/invalid-credential".
+// Se llama la primera vez que un usuario nuevo entra con Google, para que
+// elija el nombre de su club antes de arrancar a jugar.
+export async function createClub(uid, email, clubName) {
+  const clubData = {
+    club: clubName,
+    email: email || null,
+    budget: STARTING_BUDGET,
+    lineup: EMPTY_LINEUP,
+    createdAt: serverTimestamp(),
+  };
+  await setDoc(doc(db, "clubs", uid), clubData);
+  return clubData;
+}
+
+// Traduce los códigos de error más comunes del popup de Google a español.
 export function translateAuthError(code) {
   const map = {
-    "auth/email-already-in-use": "Ese email ya tiene una cuenta creada.",
-    "auth/invalid-email": "El email no es válido.",
-    "auth/weak-password": "La contraseña tiene que tener al menos 6 caracteres.",
-    "auth/invalid-credential": "Email o contraseña incorrectos.",
-    "auth/wrong-password": "Email o contraseña incorrectos.",
-    "auth/user-not-found": "No existe una cuenta con ese email.",
-    "auth/too-many-requests": "Demasiados intentos. Probá de nuevo en un rato.",
+    "auth/popup-closed-by-user": "Cerraste la ventana de Google antes de terminar.",
+    "auth/cancelled-popup-request": "Se canceló el inicio de sesión.",
+    "auth/popup-blocked": "El navegador bloqueó la ventana emergente. Habilitala e intentá de nuevo.",
+    "auth/network-request-failed": "Falló la conexión. Revisá tu internet e intentá de nuevo.",
+    "auth/unauthorized-domain": "Este dominio no está autorizado en Firebase (Authentication → Settings → Authorized domains).",
   };
-  return map[code] || "Algo salió mal. Probá de nuevo.";
+  return map[code] || "No se pudo iniciar sesión con Google. Probá de nuevo.";
 }
