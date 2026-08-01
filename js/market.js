@@ -1,0 +1,116 @@
+// ============================================================================
+// Market — mercado de fichajes
+// ============================================================================
+
+import {
+  db,
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  getDocs,
+  query,
+  where,
+  writeBatch,
+  runTransaction,
+} from "./firebase-config.js";
+import { generatePlayerPool } from "./players-seed.js";
+
+const SELL_BACK_RATE = 0.65; // % del precio que recuperás al vender
+
+// ----------------------------------------------------------------------------
+// Siembra la colección "players" una sola vez (para todo el proyecto), usando
+// un doc de control en meta/players_seed para que no se dispare dos veces
+// aunque varios usuarios abran la app al mismo tiempo.
+// ----------------------------------------------------------------------------
+export async function ensurePlayersSeeded() {
+  const metaRef = doc(db, "meta", "players_seed");
+  const metaSnap = await getDoc(metaRef);
+  if (metaSnap.exists()) return;
+
+  try {
+    await setDoc(metaRef, { seeded: true, at: Date.now() });
+  } catch (e) {
+    return; // otro cliente ya está sembrando / no hay permisos, no pasa nada
+  }
+
+  const players = generatePlayerPool();
+  const batch = writeBatch(db);
+  for (const p of players) {
+    batch.set(doc(db, "players", p.id), p);
+  }
+  await batch.commit();
+}
+
+export async function fetchFreeAgents() {
+  const q = query(collection(db, "players"), where("ownerId", "==", null));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data());
+}
+
+export async function fetchRoster(uid) {
+  const q = query(collection(db, "players"), where("ownerId", "==", uid));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data());
+}
+
+// ----------------------------------------------------------------------------
+// Fichar un jugador: transacción atómica que verifica que siga libre y que
+// el club tenga presupuesto suficiente antes de confirmar.
+// ----------------------------------------------------------------------------
+export async function buyPlayer(uid, clubName, playerId) {
+  const playerRef = doc(db, "players", playerId);
+  const clubRef = doc(db, "clubs", uid);
+
+  return runTransaction(db, async (tx) => {
+    const playerSnap = await tx.get(playerRef);
+    const clubSnap = await tx.get(clubRef);
+
+    if (!playerSnap.exists()) throw new Error("Ese jugador ya no existe.");
+    const player = playerSnap.data();
+    if (player.ownerId) throw new Error(`${player.alias} ya fue fichado por otro club.`);
+
+    const club = clubSnap.data();
+    if (club.budget < player.price) throw new Error("No te alcanza el presupuesto.");
+
+    tx.update(playerRef, { ownerId: uid, ownerClub: clubName });
+    tx.update(clubRef, { budget: club.budget - player.price });
+
+    return { newBudget: club.budget - player.price };
+  });
+}
+
+// ----------------------------------------------------------------------------
+// Vender un jugador: vuelve al mercado libre y el club recupera parte
+// del valor. Si estaba en el once titular, se lo saca del lineup.
+// ----------------------------------------------------------------------------
+export async function sellPlayer(uid, playerId) {
+  const playerRef = doc(db, "players", playerId);
+  const clubRef = doc(db, "clubs", uid);
+
+  return runTransaction(db, async (tx) => {
+    const playerSnap = await tx.get(playerRef);
+    const clubSnap = await tx.get(clubRef);
+
+    if (!playerSnap.exists()) throw new Error("Ese jugador ya no existe.");
+    const player = playerSnap.data();
+    if (player.ownerId !== uid) throw new Error("Ese jugador no es tuyo.");
+
+    const club = clubSnap.data();
+    const refund = Math.round((player.price * SELL_BACK_RATE) / 500) * 500;
+
+    const newLineup = { ...club.lineup };
+    for (const slot of Object.keys(newLineup)) {
+      if (newLineup[slot] === playerId) newLineup[slot] = null;
+    }
+
+    tx.update(playerRef, { ownerId: null, ownerClub: null });
+    tx.update(clubRef, { budget: club.budget + refund, lineup: newLineup });
+
+    return { refund, newBudget: club.budget + refund };
+  });
+}
+
+export function formatMoney(n) {
+  return "H$ " + Math.round(n).toLocaleString("es-AR");
+}

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Haxball Manager</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ===================== AUTH SCREEN ===================== -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-card">
+      <div class="brand">
+        <span class="disc"></span>
+        <h1>Haxball<span> Manager</span></h1>
+      </div>
+      <p class="auth-tagline">Fichá, armá tu once y subí a tu equipo a lo más alto de la liga.</p>
+
+      <div id="auth-error" class="auth-error hidden"></div>
+
+      <form id="login-form">
+        <div class="field">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" required autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="login-password">Contraseña</label>
+          <input type="password" id="login-password" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+      </form>
+
+      <form id="register-form" class="hidden">
+        <div class="field">
+          <label for="reg-club">Nombre del club</label>
+          <input type="text" id="reg-club" maxlength="24" required />
+        </div>
+        <div class="field">
+          <label for="reg-email">Email</label>
+          <input type="email" id="reg-email" required autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="reg-password">Contraseña</label>
+          <input type="password" id="reg-password" required minlength="6" autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Crear club</button>
+      </form>
+
+      <div class="auth-toggle">
+        <span id="toggle-to-register-wrap">¿No tenés cuenta? <button type="button" id="toggle-to-register">Crear club</button></span>
+        <span id="toggle-to-login-wrap" class="hidden">¿Ya tenés cuenta? <button type="button" id="toggle-to-login">Entrar</button></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MAIN APP (post login) ===================== -->
+  <div id="main-screen" class="hidden">
+    <div class="topbar">
+      <div class="brand">
+        <span class="disc"></span>
+        <h1 id="club-name-display">Mi Club</h1>
+      </div>
+      <div class="topbar-right">
+        <div class="budget-pill">
+          <span class="label">Presupuesto</span>
+          <span id="budget-display" class="mono">H$ 0</span>
+        </div>
+        <button id="logout-btn" class="btn btn-sm">Salir</button>
+      </div>
+    </div>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Resumen</button>
+      <button class="tab-btn" data-tab="squad">Plantilla</button>
+      <button class="tab-btn" data-tab="market">Mercado</button>
+      <button class="tab-btn" data-tab="league">Liga</button>
+    </nav>
+
+    <main>
+      <!-- ---- DASHBOARD ---- -->
+      <section id="view-dashboard" class="view">
+        <h2 class="section-title">Resumen del club</h2>
+        <p class="section-sub">Así está tu club hoy.</p>
+        <div class="grid grid-3" id="dashboard-cards"></div>
+      </section>
+
+      <!-- ---- SQUAD ---- -->
+      <section id="view-squad" class="view hidden">
+        <h2 class="section-title">Plantilla y alineación</h2>
+        <p class="section-sub">Tocá un puesto para elegir quién juega. Formación 1-2-2-1 (POR-DEF-DEF-MED-MED-DEL).</p>
+        <div id="formation-board" class="formation-board"></div>
+        <h3 style="margin-top:24px; font-family:var(--font-display); font-size:20px; text-transform:uppercase;">Suplentes</h3>
+        <div id="bench-list" class="bench-list"></div>
+      </section>
+
+      <!-- ---- MARKET ---- -->
+      <section id="view-market" class="view hidden">
+        <h2 class="section-title">Mercado de fichajes</h2>
+        <p class="section-sub">Jugadores libres disponibles para fichar. Al comprarlos, desaparecen del mercado de todos.</p>
+        <div class="filter-bar">
+          <select id="filter-position">
+            <option value="">Todas las posiciones</option>
+            <option value="POR">Portero</option>
+            <option value="DEF">Defensor</option>
+            <option value="MED">Mediocampista</option>
+            <option value="DEL">Delantero</option>
+          </select>
+          <select id="filter-rarity">
+            <option value="">Todas las rarezas</option>
+            <option value="bronce">Bronce</option>
+            <option value="plata">Plata</option>
+            <option value="oro">Oro</option>
+            <option value="leyenda">Leyenda</option>
+          </select>
+          <input type="text" id="filter-search" placeholder="Buscar nick..." />
+        </div>
+        <div id="market-grid" class="grid grid-3"></div>
+      </section>
+
+      <!-- ---- LEAGUE ---- -->
+      <section id="view-league" class="view hidden">
+        <h2 class="section-title">Liga local</h2>
+        <p class="section-sub">Tu club contra 5 equipos de la CPU. Ida y vuelta, todos contra todos.</p>
+
+        <div id="league-setup" class="empty-state hidden">
+          <h3>Todavía no armaste tu liga</h3>
+          <p style="margin-bottom:16px;">Generá el calendario para empezar a competir.</p>
+          <button id="create-league-btn" class="btn btn-primary">Crear liga</button>
+        </div>
+
+        <div id="league-active" class="hidden">
+          <div class="grid grid-2" style="align-items:start;">
+            <div class="card">
+              <h3 style="font-family:var(--font-display); font-size:20px; text-transform:uppercase; margin-bottom:12px;">Tabla de posiciones</h3>
+              <div style="overflow-x:auto;">
+                <table class="league-table" id="league-table"></table>
+              </div>
+            </div>
+            <div class="card">
+              <h3 style="font-family:var(--font-display); font-size:20px; text-transform:uppercase; margin-bottom:12px;">Próxima jornada</h3>
+              <div id="next-fixtures"></div>
+              <button id="simulate-matchday-btn" class="btn btn-primary btn-block" style="margin-top:14px;">Simular jornada</button>
+            </div>
+          </div>
+
+          <div class="card" id="match-result-card" style="margin-top:18px;" hidden>
+            <h3 style="font-family:var(--font-display); font-size:20px; text-transform:uppercase; margin-bottom:14px;">Tu partido</h3>
+            <div class="scoreboard-wrap">
+              <div class="scoreboard">
+                <div class="team-name home" id="score-home"></div>
+                <div class="score" id="score-numbers">0 - 0</div>
+                <div class="team-name" id="score-away"></div>
+              </div>
+              <div class="clock" id="score-clock">MIN 0'</div>
+            </div>
+            <div class="match-feed" id="match-feed"></div>
+          </div>
+
+          <div class="card" style="margin-top:18px;">
+            <h3 style="font-family:var(--font-display); font-size:20px; text-transform:uppercase; margin-bottom:12px;">Resultados de la jornada</h3>
+            <div id="matchday-results"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast-container"></div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
