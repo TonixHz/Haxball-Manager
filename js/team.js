@@ -1,5 +1,5 @@
 // ============================================================================
-// Team — alineación (formación 1-2-2-1) y fuerza del equipo
+// Team — alineación (varias formaciones) y fuerza del equipo
 // ============================================================================
 
 import { db, doc, updateDoc } from "./firebase-config.js";
@@ -57,10 +57,9 @@ export function getFormationSlots(formationKey) {
 export const FORMATION_SLOTS = getFormationSlots(DEFAULT_FORMATION);
 
 // Arma automáticamente el mejor once posible con un plantel dado, para una
-// formación puntual. Se usa para los equipos CPU (y sirve también como
-// ayuda si hiciera falta armar un equipo rápido). Prioriza cubrir cada
-// puesto con un jugador de esa posición; si no hay, mete al mejor que
-// quede libre (penaliza igual en computeTeamStrength por overall bajo).
+// formación puntual. Se usa para los equipos CPU dentro de una partida.
+// Prioriza cubrir cada puesto con un jugador de esa posición; si no hay,
+// mete al mejor que quede libre (penaliza igual en computeTeamStrength).
 export function autoPickLineup(formationKey, players) {
   const slots = getFormationSlots(formationKey);
   const pool = players.slice();
@@ -107,14 +106,16 @@ export function clearSlot(lineup, slotKey) {
   return { ...lineup, [slotKey]: null };
 }
 
-export async function saveLineup(uid, lineup) {
-  await updateDoc(doc(db, "clubs", uid), { lineup });
+// Todo lo que persiste la alineación/formación ahora escribe en
+// saves/{saveId}, la partida — nunca en el catálogo maestro.
+export async function saveLineup(saveId, lineup) {
+  await updateDoc(doc(db, "saves", saveId), { lineup });
 }
 
 // Cambiar de formación reinicia el once (los puestos cambian de forma
 // y no siempre hay un mapeo obvio), así que se guardan juntos.
-export async function saveFormation(uid, formation, lineup) {
-  await updateDoc(doc(db, "clubs", uid), { formation, lineup });
+export async function saveFormation(saveId, formation, lineup) {
+  await updateDoc(doc(db, "saves", saveId), { formation, lineup });
 }
 
 // Fuerza del equipo = promedio del overall de los titulares.

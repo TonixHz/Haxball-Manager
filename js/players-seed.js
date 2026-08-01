@@ -1,8 +1,9 @@
 // ============================================================================
 // Jugadores — datos de ejemplo (PLACEHOLDER)
 // ----------------------------------------------------------------------------
-// Reemplazá "alias" por los nicks reales de la comunidad de Haxball que
-// quieras usar, y ajustá las stats como quieras. Cada jugador tiene:
+// Este archivo genera el CATÁLOGO MAESTRO del juego (colección global
+// "players"). Nunca genera jugadores dentro de una partida — eso lo hace
+// market.js copiando este pool hacia saves/{saveId}/players.
 //
 //   alias      -> nombre que se muestra (el "nick" de Haxball)
 //   position   -> "POR" | "DEF" | "MED" | "DEL"
@@ -14,9 +15,9 @@
 // ============================================================================
 
 // Subí este número cada vez que cambies COMMUNITY_PLAYERS/DETAILED_PLAYERS
-// de forma importante: ensurePlayersSeeded() lo usa para darse cuenta de que
-// el mercado quedó desactualizado (con los "Jugador 00" viejos) y refrescarlo.
-export const SEED_VERSION = 2;
+// de forma importante: ensureMasterPlayersSeeded() lo usa para darse cuenta
+// de que el catálogo maestro quedó desactualizado y refrescarlo por completo.
+export const SEED_VERSION = 3;
 
 export const RARITY_ORDER = ["bronce", "plata", "oro", "leyenda"];
 
@@ -212,6 +213,12 @@ function statsFromDetailed(position, raw) {
   return { velocidad, tiro, pase, regate, defensa, portero };
 }
 
+// ----------------------------------------------------------------------------
+// IMPORTANTE: estos builders generan el CATÁLOGO MAESTRO. No llevan ownerId
+// ni ownerClub — el maestro es un catálogo puro, sin estado de partida.
+// Esos campos (y todos los de carrera: edad, goles, moral, etc.) se agregan
+// recién al copiar el pool dentro de una partida (ver market.copyMasterPlayersToSave).
+// ----------------------------------------------------------------------------
 function buildDetailedPlayer(def, n) {
   const rarity = deriveRarity(def.overall);
   return {
@@ -224,8 +231,6 @@ function buildDetailedPlayer(def, n) {
     overall: def.overall,
     potential: def.potential,
     price: computePrice(def.overall, rarity),
-    ownerId: null,
-    ownerClub: null,
   };
 }
 
@@ -248,11 +253,10 @@ function buildCommunityPlayer(def, n) {
     overall: def.overall,
     potential: def.potential,
     price: computePrice(def.overall, rarity),
-    ownerId: null,
-    ownerClub: null,
   };
 }
 
+// Genera el catálogo maestro completo (sin estado de partida ni dueños).
 export function generatePlayerPool() {
   const players = [];
   let n = 1;
@@ -271,8 +275,9 @@ export function generatePlayerPool() {
 }
 
 // ----------------------------------------------------------------------------
-// Genera equipos CPU para la liga local a partir de un pool de jugadores
-// que no pertenece a ningún usuario (o del pool completo si hace falta).
+// Genera equipos CPU para la liga local. La "fuerza" depende del plantel
+// que le tocó dentro de la partida (ver league.js), esta función solo da
+// el nombre — se mantiene por compatibilidad con el resto del código.
 // ----------------------------------------------------------------------------
 export const CPU_TEAM_NAMES = [
   "Turbo FC",
@@ -283,8 +288,6 @@ export const CPU_TEAM_NAMES = [
 ];
 
 export function generateCpuTeam(name, seedIndex) {
-  // Cada equipo CPU tiene una "fuerza" fija que se usa directo en la simulación,
-  // no dependen de la colección de Firestore de jugadores.
   const strength = 45 + ((seedIndex * 13) % 40); // 45-84 aprox, variado
   return { name, strength, isCpu: true };
 }

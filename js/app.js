@@ -3,10 +3,10 @@
 // ============================================================================
 
 import { auth, onAuthStateChanged } from "./firebase-config.js";
-import { signInWithGoogle, logoutClub, getClubDoc, createClub, translateAuthError, buildEmptyLineup, deleteClubDoc } from "./auth.js";
-import { ensurePlayersSeeded, fetchFreeAgents, fetchRoster, buyPlayer, sellPlayer, releaseRoster, formatMoney } from "./market.js";
+import { signInWithGoogle, logoutClub, getActiveSave, createSave, translateAuthError, buildEmptyLineup, deleteActiveSave } from "./auth.js";
+import { ensureMasterPlayersSeeded, fetchFreeAgents, fetchRoster, buyPlayer, sellPlayer, formatMoney } from "./market.js";
 import { FORMATIONS, DEFAULT_FORMATION, getFormationSlots, assignSlot, clearSlot, saveLineup, saveFormation, computeTeamStrength, rosterToMap } from "./team.js";
-import { createLeague, getLeague, computeStandings, getNextMatchday, simulateCurrentMatchday, deleteLeague, YOU_ID } from "./league.js";
+import { createLeague, getLeague, computeStandings, getNextMatchday, simulateCurrentMatchday, YOU_ID } from "./league.js";
 import { RARITY_COLORS } from "./players-seed.js";
 
 // ----------------------------------------------------------------------------
@@ -14,8 +14,8 @@ import { RARITY_COLORS } from "./players-seed.js";
 // ----------------------------------------------------------------------------
 const state = {
   user: null,
-  club: null,       // { club, budget, lineup }
-  roster: [],        // jugadores del usuario
+  save: null,        // { saveId, club, budget, formation, lineup, ... } — la partida activa
+  roster: [],        // jugadores del usuario EN ESTA PARTIDA
   rosterMap: {},      // id -> jugador
   freeAgents: [],
   league: null,
@@ -61,7 +61,8 @@ $("setup-form").addEventListener("submit", async (e) => {
   const submitBtn = e.target.querySelector("button[type=submit]");
   submitBtn.disabled = true;
   try {
-    state.club = await createClub(state.user.uid, state.user.email, clubName);
+    // Crea la partida y copia el catálogo maestro completo hacia ella.
+    state.save = await createSave(state.user.uid, state.user.email, clubName);
     $("setup-screen").classList.add("hidden");
     $("main-screen").classList.remove("hidden");
     await finishBootstrap();
@@ -74,17 +75,15 @@ $("setup-form").addEventListener("submit", async (e) => {
 $("logout-btn").addEventListener("click", () => logoutClub());
 
 $("delete-career-btn").addEventListener("click", async () => {
-  if (!confirm("Esto borra tu club, tu plantilla y tu liga para empezar de cero. Los jugadores que tenías vuelven al mercado libre. ¿Seguro que querés borrar tu carrera?")) return;
+  if (!confirm("Esto borra tu partida, tu plantilla y tu liga para empezar de cero. El catálogo global de jugadores del juego no se toca. ¿Seguro que querés borrar tu carrera?")) return;
   if (!confirm("Es definitivo, no se puede deshacer. ¿Confirmás?")) return;
 
   const btn = $("delete-career-btn");
   btn.disabled = true;
   try {
-    await releaseRoster(state.user.uid);
-    if (state.league) await deleteLeague(state.user.uid);
-    await deleteClubDoc(state.user.uid);
+    await deleteActiveSave(state.user.uid, state.save.saveId);
 
-    state.club = null;
+    state.save = null;
     state.roster = [];
     state.rosterMap = {};
     state.freeAgents = [];
@@ -106,24 +105,25 @@ $("delete-career-btn").addEventListener("click", async () => {
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     state.user = user;
-    const existingClub = await getClubDoc(user.uid);
+    const activeSave = await getActiveSave(user.uid);
 
-    if (!existingClub) {
-      // Primera vez que este usuario entra: le pedimos nombre de club
+    if (!activeSave) {
+      // Este usuario no tiene partida activa (nunca creó una, o la borró):
+      // le pedimos nombre de club para arrancar una nueva.
       $("auth-screen").classList.add("hidden");
       $("setup-screen").classList.remove("hidden");
       $("setup-club").value = "";
       return;
     }
 
-    state.club = existingClub;
+    state.save = activeSave;
     $("auth-screen").classList.add("hidden");
     $("setup-screen").classList.add("hidden");
     $("main-screen").classList.remove("hidden");
     await finishBootstrap();
   } else {
     state.user = null;
-    state.club = null;
+    state.save = null;
     $("main-screen").classList.add("hidden");
     $("setup-screen").classList.add("hidden");
     $("auth-screen").classList.remove("hidden");
@@ -131,14 +131,17 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 async function finishBootstrap() {
-  await ensurePlayersSeeded();
-  if (!state.club.formation) state.club.formation = DEFAULT_FORMATION; // clubes viejos sin formación guardada
-  state.roster = await fetchRoster(state.user.uid);
-  state.rosterMap = rosterToMap(state.roster);
-  state.league = await getLeague(state.user.uid);
+  // Si el catálogo maestro global todavía no existe (primer arranque del
+  // juego), se siembra acá; si ya existe, esto no hace nada.
+  await ensureMasterPlayersSeeded();
 
-  $("club-name-display").textContent = state.club.club;
-  $("budget-display").textContent = formatMoney(state.club.budget);
+  if (!state.save.formation) state.save.formation = DEFAULT_FORMATION; // partidas viejas sin formación guardada
+  state.roster = await fetchRoster(state.save.saveId);
+  state.rosterMap = rosterToMap(state.roster);
+  state.league = await getLeague(state.save.saveId);
+
+  $("club-name-display").textContent = state.save.club;
+  $("budget-display").textContent = formatMoney(state.save.budget);
 
   renderActiveTab();
 }
@@ -170,7 +173,7 @@ function renderActiveTab() {
 // ============================================================================
 
 function renderDashboard() {
-  const starters = Object.values(state.club.lineup).filter(Boolean).length;
+  const starters = Object.values(state.save.lineup).filter(Boolean).length;
   let posText = "Todavía no armaste tu liga";
   if (state.league) {
     const standings = computeStandings(state.league);
@@ -181,7 +184,7 @@ function renderDashboard() {
   $("dashboard-cards").innerHTML = `
     <div class="card">
       <div class="section-sub" style="margin-bottom:6px;">Presupuesto</div>
-      <div class="mono" style="font-size:26px; color:var(--gold);">${formatMoney(state.club.budget)}</div>
+      <div class="mono" style="font-size:26px; color:var(--gold);">${formatMoney(state.save.budget)}</div>
     </div>
     <div class="card">
       <div class="section-sub" style="margin-bottom:6px;">Plantilla</div>
@@ -210,7 +213,7 @@ function renderFormationBar() {
     <label for="formation-select" style="font-size:12px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim); margin-right:8px;">Formación</label>
     <select id="formation-select">
       ${Object.keys(FORMATIONS)
-        .map((key) => `<option value="${key}" ${state.club.formation === key ? "selected" : ""}>${FORMATIONS[key].label}</option>`)
+        .map((key) => `<option value="${key}" ${state.save.formation === key ? "selected" : ""}>${FORMATIONS[key].label}</option>`)
         .join("")}
     </select>
   `;
@@ -219,15 +222,15 @@ function renderFormationBar() {
 
 async function onFormationChange(e) {
   const newFormation = e.target.value;
-  if (newFormation === state.club.formation) return;
+  if (newFormation === state.save.formation) return;
   if (!confirm("Cambiar de formación vacía tu alineación actual (los jugadores vuelven al banco). ¿Seguir?")) {
-    e.target.value = state.club.formation;
+    e.target.value = state.save.formation;
     return;
   }
-  state.club.formation = newFormation;
-  state.club.lineup = buildEmptyLineup(newFormation);
+  state.save.formation = newFormation;
+  state.save.lineup = buildEmptyLineup(newFormation);
   state.selectedSlot = null;
-  await saveFormation(state.user.uid, newFormation, state.club.lineup);
+  await saveFormation(state.save.saveId, newFormation, state.save.lineup);
   renderSquad();
 }
 
@@ -235,7 +238,7 @@ function renderSquad() {
   renderFormationBar();
 
   const board = $("formation-board");
-  const slots = getFormationSlots(state.club.formation);
+  const slots = getFormationSlots(state.save.formation);
   // Filas de arriba (ataque) hacia abajo (arquero), agrupando por posición.
   const rowOrder = ["DEL", "MED", "DEF", "POR"];
   const rows = rowOrder
@@ -249,7 +252,7 @@ function renderSquad() {
       ${row
         .map((key) => {
           const slot = slots.find((s) => s.key === key);
-          const pid = state.club.lineup[key];
+          const pid = state.save.lineup[key];
           const player = pid ? state.rosterMap[pid] : null;
           const selected = state.selectedSlot === key;
           return `
@@ -274,13 +277,13 @@ function renderSquad() {
 }
 
 async function onSlotClick(slotKey) {
-  const currentPid = state.club.lineup[slotKey];
+  const currentPid = state.save.lineup[slotKey];
 
   if (currentPid) {
     // Sacar al jugador de este puesto (vuelve al banco)
-    state.club.lineup = clearSlot(state.club.lineup, slotKey);
+    state.save.lineup = clearSlot(state.save.lineup, slotKey);
     state.selectedSlot = null;
-    await saveLineup(state.user.uid, state.club.lineup);
+    await saveLineup(state.save.saveId, state.save.lineup);
     renderSquad();
     return;
   }
@@ -294,7 +297,7 @@ async function onSlotClick(slotKey) {
 }
 
 function renderBench() {
-  const assignedIds = new Set(Object.values(state.club.lineup).filter(Boolean));
+  const assignedIds = new Set(Object.values(state.save.lineup).filter(Boolean));
   const bench = state.roster.filter((p) => !assignedIds.has(p.id));
 
   if (bench.length === 0) {
@@ -333,13 +336,13 @@ async function onSell(playerId) {
   if (!confirm(`¿Vender a ${player.alias} por ${formatMoney(refundEstimate)}?`)) return;
 
   try {
-    const { newBudget } = await sellPlayer(state.user.uid, playerId);
-    state.club.budget = newBudget;
+    const { newBudget } = await sellPlayer(state.save.saveId, playerId);
+    state.save.budget = newBudget;
     $("budget-display").textContent = formatMoney(newBudget);
 
-    state.roster = await fetchRoster(state.user.uid);
+    state.roster = await fetchRoster(state.save.saveId);
     state.rosterMap = rosterToMap(state.roster);
-    marketLoaded = false; // el jugador vendido vuelve a estar disponible en el mercado
+    marketLoaded = false; // el jugador vendido vuelve a estar disponible en el mercado de esta partida
 
     renderSquad();
     renderDashboard();
@@ -354,7 +357,7 @@ async function onBenchPick(playerId) {
     showToast("Primero tocá un puesto vacío en la cancha.", true);
     return;
   }
-  const slot = getFormationSlots(state.club.formation).find((s) => s.key === state.selectedSlot);
+  const slot = getFormationSlots(state.save.formation).find((s) => s.key === state.selectedSlot);
   const player = state.rosterMap[playerId];
 
   if (player.position !== slot.pos) {
@@ -362,9 +365,9 @@ async function onBenchPick(playerId) {
     return;
   }
 
-  state.club.lineup = assignSlot(state.club.lineup, state.selectedSlot, playerId);
+  state.save.lineup = assignSlot(state.save.lineup, state.selectedSlot, playerId);
   state.selectedSlot = null;
-  await saveLineup(state.user.uid, state.club.lineup);
+  await saveLineup(state.save.saveId, state.save.lineup);
   renderSquad();
 }
 
@@ -376,7 +379,7 @@ let marketLoaded = false;
 
 async function loadAndRenderMarket() {
   if (!marketLoaded) {
-    state.freeAgents = await fetchFreeAgents();
+    state.freeAgents = await fetchFreeAgents(state.save.saveId);
     marketLoaded = true;
   }
   renderMarket();
@@ -448,12 +451,12 @@ function statRow(label, val) {
 
 async function onBuy(playerId) {
   try {
-    const { newBudget } = await buyPlayer(state.user.uid, state.club.club, playerId);
-    state.club.budget = newBudget;
+    const { newBudget } = await buyPlayer(state.save.saveId, state.save.club, playerId);
+    state.save.budget = newBudget;
     $("budget-display").textContent = formatMoney(newBudget);
 
     state.freeAgents = state.freeAgents.filter((p) => p.id !== playerId);
-    state.roster = await fetchRoster(state.user.uid);
+    state.roster = await fetchRoster(state.save.saveId);
     state.rosterMap = rosterToMap(state.roster);
 
     renderMarket();
@@ -480,7 +483,7 @@ function renderLeagueView() {
 }
 
 $("create-league-btn").addEventListener("click", async () => {
-  state.league = await createLeague(state.user.uid, state.club.club);
+  state.league = await createLeague(state.save.saveId, state.save.club);
   renderLeagueView();
   renderDashboard();
 });
@@ -519,9 +522,9 @@ function renderStandings() {
 // que se le armó automáticamente al crear la liga).
 function teamLineupList(teamId) {
   if (teamId === YOU_ID) {
-    return getFormationSlots(state.club.formation)
+    return getFormationSlots(state.save.formation)
       .map((slot) => {
-        const pid = state.club.lineup[slot.key];
+        const pid = state.save.lineup[slot.key];
         const player = pid ? state.rosterMap[pid] : null;
         return { slotLabel: slot.label, alias: player ? player.alias : "Vacío", overall: player ? player.overall : null };
       });
@@ -535,7 +538,7 @@ function teamLineupList(teamId) {
 }
 
 function teamFormationLabel(teamId) {
-  if (teamId === YOU_ID) return FORMATIONS[state.club.formation]?.label || state.club.formation;
+  if (teamId === YOU_ID) return FORMATIONS[state.save.formation]?.label || state.save.formation;
   const team = state.league.teams[teamId];
   return team.formation ? FORMATIONS[team.formation]?.label || team.formation : "—";
 }
@@ -596,9 +599,9 @@ $("simulate-matchday-btn").addEventListener("click", async () => {
   btn.innerHTML = `<span class="spinner"></span>`;
 
   try {
-    const yourStrength = computeTeamStrength(state.club.lineup, state.rosterMap);
+    const yourStrength = computeTeamStrength(state.save.lineup, state.rosterMap);
     const { league, round, yourMatch } = await simulateCurrentMatchday(
-      state.user.uid,
+      state.save.saveId,
       state.league,
       yourStrength
     );

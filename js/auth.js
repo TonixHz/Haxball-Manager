@@ -1,5 +1,12 @@
 // ============================================================================
-// Auth — login con Google + creación del "club" del usuario
+// Auth — login con Google + gestión de la partida ("save") del usuario
+// ----------------------------------------------------------------------------
+// users/{uid}          -> puntero liviano: { activeSaveId }
+// saves/{saveId}        -> la partida en sí (club, presupuesto, alineación)
+// saves/{saveId}/players -> copia independiente del catálogo maestro (market.js)
+// leagues/{saveId}       -> la liga de esa partida (league.js)
+//
+// El catálogo maestro "players" nunca se toca desde acá.
 // ============================================================================
 
 import {
@@ -13,8 +20,11 @@ import {
   getDoc,
   deleteDoc,
   serverTimestamp,
+  collection,
 } from "./firebase-config.js";
 import { getFormationSlots, DEFAULT_FORMATION } from "./team.js";
+import { copyMasterPlayersToSave, deleteSavePlayers } from "./market.js";
+import { deleteLeague } from "./league.js";
 
 export const STARTING_BUDGET = 200000;
 
@@ -38,20 +48,32 @@ export async function logoutClub() {
   await fbSignOut(auth);
 }
 
-export async function getClubDoc(uid) {
-  const snap = await getDoc(doc(db, "clubs", uid));
-  return snap.exists() ? snap.data() : null;
+// ----------------------------------------------------------------------------
+// Devuelve la partida activa del usuario (o null si nunca creó una / la
+// borró). users/{uid}.activeSaveId es el único lugar donde uid y saveId
+// se cruzan — todo lo demás (mercado, plantilla, liga) trabaja con saveId.
+// ----------------------------------------------------------------------------
+export async function getActiveSave(uid) {
+  const userSnap = await getDoc(doc(db, "users", uid));
+  const saveId = userSnap.exists() ? userSnap.data().activeSaveId : null;
+  if (!saveId) return null;
+
+  const saveSnap = await getDoc(doc(db, "saves", saveId));
+  if (!saveSnap.exists()) return null; // puntero colgado, por las dudas
+
+  return { saveId, ...saveSnap.data() };
 }
 
-// Borra el club del usuario (se usa al "borrar carrera y empezar de nuevo").
-export async function deleteClubDoc(uid) {
-  await deleteDoc(doc(db, "clubs", uid));
-}
+// Se llama la primera vez que un usuario nuevo entra con Google (o después
+// de borrar su carrera), para arrancar una partida nueva desde cero.
+// Copia TODO el catálogo maestro a saves/{saveId}/players: la partida queda
+// 100% independiente desde el minuto uno.
+export async function createSave(uid, email, clubName) {
+  const saveRef = doc(collection(db, "saves"));
+  const saveId = saveRef.id;
 
-// Se llama la primera vez que un usuario nuevo entra con Google, para que
-// elija el nombre de su club antes de arrancar a jugar.
-export async function createClub(uid, email, clubName) {
-  const clubData = {
+  const saveData = {
+    ownerUid: uid,
     club: clubName,
     email: email || null,
     budget: STARTING_BUDGET,
@@ -59,8 +81,23 @@ export async function createClub(uid, email, clubName) {
     lineup: buildEmptyLineup(DEFAULT_FORMATION),
     createdAt: serverTimestamp(),
   };
-  await setDoc(doc(db, "clubs", uid), clubData);
-  return clubData;
+  await setDoc(saveRef, saveData);
+
+  await copyMasterPlayersToSave(saveId);
+
+  await setDoc(doc(db, "users", uid), { activeSaveId: saveId }, { merge: true });
+
+  return { saveId, ...saveData };
+}
+
+// Borra la partida activa por completo: su copia de jugadores, su liga y el
+// doc de la partida. El catálogo maestro "players" queda exactamente igual,
+// así que la próxima partida vuelve a arrancar con el pool completo.
+export async function deleteActiveSave(uid, saveId) {
+  await deleteSavePlayers(saveId);
+  await deleteLeague(saveId);
+  await deleteDoc(doc(db, "saves", saveId));
+  await setDoc(doc(db, "users", uid), { activeSaveId: null }, { merge: true });
 }
 
 // Traduce los códigos de error más comunes del popup de Google a español.

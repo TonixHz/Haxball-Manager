@@ -1,11 +1,16 @@
 // ============================================================================
 // League — liga local (tu club + 5 CPU), calendario ida y vuelta
+// ----------------------------------------------------------------------------
+// La liga vive en leagues/{saveId}: cada partida tiene la suya, totalmente
+// independiente. Los planteles CPU se arman con jugadores de
+// saves/{saveId}/players (la copia de esa partida), nunca del catálogo
+// maestro.
 // ============================================================================
 
 import { db, doc, getDoc, setDoc, updateDoc, deleteDoc } from "./firebase-config.js";
 import { CPU_TEAM_NAMES } from "./players-seed.js";
 import { simulateMatch, simulateMatchScoreOnly } from "./simulation.js";
-import { fetchAllPlayers, assignFreeAgentsToCpuTeams } from "./market.js";
+import { fetchAllSavePlayers, assignFreeAgentsToCpuTeams } from "./market.js";
 import { FORMATIONS, autoPickLineup, computeTeamStrength, rosterToMap } from "./team.js";
 
 export const YOU_ID = "you";
@@ -54,7 +59,9 @@ function buildFixtures(teamIds) {
   }));
 }
 
-export async function createLeague(uid, clubName) {
+// saveId identifica la partida (no el usuario): la liga, igual que el
+// mercado, es exclusiva de esa partida.
+export async function createLeague(saveId, clubName) {
   const teams = {
     [YOU_ID]: { name: clubName, isCpu: false },
   };
@@ -62,14 +69,14 @@ export async function createLeague(uid, clubName) {
     teams[`cpu${i}`] = { name, isCpu: true };
   });
 
-  // Los jugadores que nadie fichó todavía se reparten al azar (sin
-  // equilibrar) entre los 5 clubes CPU, así arrancan con plantel propio.
+  // Los jugadores que nadie fichó todavía DENTRO DE ESTA PARTIDA se
+  // reparten al azar (sin equilibrar) entre los 5 clubes CPU.
   const cpuTeamsOnly = {};
   CPU_TEAM_NAMES.forEach((name, i) => (cpuTeamsOnly[`cpu${i}`] = { name }));
 
-  const allPlayers = await fetchAllPlayers();
+  const allPlayers = await fetchAllSavePlayers(saveId);
   const freeAgents = allPlayers.filter((p) => !p.ownerId);
-  const assignment = await assignFreeAgentsToCpuTeams(freeAgents, cpuTeamsOnly);
+  const assignment = await assignFreeAgentsToCpuTeams(saveId, freeAgents, cpuTeamsOnly);
 
   const formationKeys = Object.keys(FORMATIONS);
   for (const cpuId of Object.keys(cpuTeamsOnly)) {
@@ -84,7 +91,7 @@ export async function createLeague(uid, clubName) {
       strength,
       formation,
       // "foto" de la alineación elegida, para poder mostrarla en el fixture
-      // sin tener que volver a leer la colección de jugadores.
+      // sin tener que volver a leer la subcolección de jugadores.
       lineupPreview: chosen.map((p) => ({
         slotKey: p.slotKey,
         slotLabel: p.slotLabel,
@@ -106,18 +113,19 @@ export async function createLeague(uid, clubName) {
     totalMatchdays: fixtures.length,
   };
 
-  await setDoc(doc(db, "leagues", uid), leagueDoc);
+  await setDoc(doc(db, "leagues", saveId), leagueDoc);
   return leagueDoc;
 }
 
-export async function getLeague(uid) {
-  const snap = await getDoc(doc(db, "leagues", uid));
+export async function getLeague(saveId) {
+  const snap = await getDoc(doc(db, "leagues", saveId));
   return snap.exists() ? snap.data() : null;
 }
 
-// Borra la liga del usuario (se usa al borrar la carrera para empezar de cero).
-export async function deleteLeague(uid) {
-  await deleteDoc(doc(db, "leagues", uid));
+// Borra la liga de una partida (se usa al borrar la carrera para empezar de
+// cero). No afecta otras partidas ni el catálogo maestro.
+export async function deleteLeague(saveId) {
+  await deleteDoc(doc(db, "leagues", saveId));
 }
 
 export function computeStandings(league) {
@@ -158,7 +166,7 @@ export function getNextMatchday(league) {
 // directo; el partido de "you" (si hay) devuelve además el timeline
 // completo para animarlo en el marcador.
 // ----------------------------------------------------------------------------
-export async function simulateCurrentMatchday(uid, league, yourStrength) {
+export async function simulateCurrentMatchday(saveId, league, yourStrength) {
   const idx = league.currentMatchday;
   if (idx >= league.totalMatchdays) throw new Error("La liga ya terminó.");
 
@@ -201,7 +209,7 @@ export async function simulateCurrentMatchday(uid, league, yourStrength) {
     currentMatchday: idx + 1,
   };
 
-  await updateDoc(doc(db, "leagues", uid), {
+  await updateDoc(doc(db, "leagues", saveId), {
     fixtures: newFixtures,
     currentMatchday: idx + 1,
   });
