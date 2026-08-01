@@ -7,11 +7,10 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut,
   onAuthStateChanged,
-  updateProfile,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore,
@@ -45,11 +44,10 @@ export const db = getFirestore(app);
 // Re-exportamos todo lo que van a necesitar los demás módulos
 // para no tener que repetir imports del CDN en cada archivo.
 export {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut,
   onAuthStateChanged,
-  updateProfile,
   doc,
   getDoc,
   setDoc,
