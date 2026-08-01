@@ -48,6 +48,36 @@ export async function fetchFreeAgents() {
   return snap.docs.map((d) => d.data());
 }
 
+export async function fetchAllPlayers() {
+  const snap = await getDocs(collection(db, "players"));
+  return snap.docs.map((d) => d.data());
+}
+
+// ----------------------------------------------------------------------------
+// Al crear la liga, todo jugador libre (que nadie fichó todavía) se reparte
+// al azar entre los 5 equipos CPU — sin ningún criterio de equilibrio, pura
+// suerte, así que un CPU puede terminar con un plantel mucho mejor que otro.
+// Quedan marcados como fichados por ese CPU y desaparecen del mercado.
+// ----------------------------------------------------------------------------
+export async function assignFreeAgentsToCpuTeams(freeAgents, cpuTeams) {
+  const cpuIds = Object.keys(cpuTeams);
+  const assignment = {};
+  cpuIds.forEach((id) => (assignment[id] = []));
+
+  const batch = writeBatch(db);
+  for (const player of freeAgents) {
+    const cpuId = cpuIds[Math.floor(Math.random() * cpuIds.length)];
+    assignment[cpuId].push(player);
+    batch.update(doc(db, "players", player.id), {
+      ownerId: cpuId,
+      ownerClub: cpuTeams[cpuId].name,
+    });
+  }
+  await batch.commit();
+
+  return assignment;
+}
+
 export async function fetchRoster(uid) {
   const q = query(collection(db, "players"), where("ownerId", "==", uid));
   const snap = await getDocs(q);

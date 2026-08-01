@@ -3,9 +3,9 @@
 // ============================================================================
 
 import { auth, onAuthStateChanged } from "./firebase-config.js";
-import { signInWithGoogle, logoutClub, getClubDoc, createClub, translateAuthError } from "./auth.js";
+import { signInWithGoogle, logoutClub, getClubDoc, createClub, translateAuthError, buildEmptyLineup } from "./auth.js";
 import { ensurePlayersSeeded, fetchFreeAgents, fetchRoster, buyPlayer, sellPlayer, formatMoney } from "./market.js";
-import { FORMATION_SLOTS, assignSlot, clearSlot, saveLineup, computeTeamStrength, rosterToMap } from "./team.js";
+import { FORMATIONS, DEFAULT_FORMATION, getFormationSlots, assignSlot, clearSlot, saveLineup, saveFormation, computeTeamStrength, rosterToMap } from "./team.js";
 import { createLeague, getLeague, computeStandings, getNextMatchday, simulateCurrentMatchday, YOU_ID } from "./league.js";
 import { RARITY_COLORS } from "./players-seed.js";
 
@@ -102,6 +102,7 @@ onAuthStateChanged(auth, async (user) => {
 
 async function finishBootstrap() {
   await ensurePlayersSeeded();
+  if (!state.club.formation) state.club.formation = DEFAULT_FORMATION; // clubes viejos sin formación guardada
   state.roster = await fetchRoster(state.user.uid);
   state.rosterMap = rosterToMap(state.roster);
   state.league = await getLeague(state.user.uid);
@@ -155,7 +156,7 @@ function renderDashboard() {
     <div class="card">
       <div class="section-sub" style="margin-bottom:6px;">Plantilla</div>
       <div style="font-size:26px; font-family:var(--font-display);">${state.roster.length} jugadores</div>
-      <div class="section-sub" style="margin-top:4px;">${starters}/6 titulares definidos</div>
+      <div class="section-sub" style="margin-top:4px;">${starters}/5 titulares definidos</div>
     </div>
     <div class="card">
       <div class="section-sub" style="margin-bottom:6px;">Liga local</div>
@@ -172,14 +173,44 @@ function discInitials(alias) {
   return alias.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 }
 
+function renderFormationBar() {
+  const bar = $("formation-bar");
+  if (!bar) return;
+  bar.innerHTML = `
+    <label for="formation-select" style="font-size:12px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim); margin-right:8px;">Formación</label>
+    <select id="formation-select">
+      ${Object.keys(FORMATIONS)
+        .map((key) => `<option value="${key}" ${state.club.formation === key ? "selected" : ""}>${FORMATIONS[key].label}</option>`)
+        .join("")}
+    </select>
+  `;
+  $("formation-select").addEventListener("change", onFormationChange);
+}
+
+async function onFormationChange(e) {
+  const newFormation = e.target.value;
+  if (newFormation === state.club.formation) return;
+  if (!confirm("Cambiar de formación vacía tu alineación actual (los jugadores vuelven al banco). ¿Seguir?")) {
+    e.target.value = state.club.formation;
+    return;
+  }
+  state.club.formation = newFormation;
+  state.club.lineup = buildEmptyLineup(newFormation);
+  state.selectedSlot = null;
+  await saveFormation(state.user.uid, newFormation, state.club.lineup);
+  renderSquad();
+}
+
 function renderSquad() {
+  renderFormationBar();
+
   const board = $("formation-board");
-  const rows = [
-    ["DEL"],
-    ["MED1", "MED2"],
-    ["DEF1", "DEF2"],
-    ["POR"],
-  ];
+  const slots = getFormationSlots(state.club.formation);
+  // Filas de arriba (ataque) hacia abajo (arquero), agrupando por posición.
+  const rowOrder = ["DEL", "MED", "DEF", "POR"];
+  const rows = rowOrder
+    .map((pos) => slots.filter((s) => s.pos === pos).map((s) => s.key))
+    .filter((row) => row.length > 0);
 
   board.innerHTML = rows
     .map(
@@ -187,7 +218,7 @@ function renderSquad() {
     <div class="formation-row">
       ${row
         .map((key) => {
-          const slot = FORMATION_SLOTS.find((s) => s.key === key);
+          const slot = slots.find((s) => s.key === key);
           const pid = state.club.lineup[key];
           const player = pid ? state.rosterMap[pid] : null;
           const selected = state.selectedSlot === key;
@@ -293,7 +324,7 @@ async function onBenchPick(playerId) {
     showToast("Primero tocá un puesto vacío en la cancha.", true);
     return;
   }
-  const slot = FORMATION_SLOTS.find((s) => s.key === state.selectedSlot);
+  const slot = getFormationSlots(state.club.formation).find((s) => s.key === state.selectedSlot);
   const player = state.rosterMap[playerId];
 
   if (player.position !== slot.pos) {
@@ -453,6 +484,45 @@ function renderStandings() {
   `;
 }
 
+// Arma la lista de titulares (puesto + nombre + overall) de un equipo, ya
+// sea el tuyo (según tu alineación actual) o un CPU (según la alineación
+// que se le armó automáticamente al crear la liga).
+function teamLineupList(teamId) {
+  if (teamId === YOU_ID) {
+    return getFormationSlots(state.club.formation)
+      .map((slot) => {
+        const pid = state.club.lineup[slot.key];
+        const player = pid ? state.rosterMap[pid] : null;
+        return { slotLabel: slot.label, alias: player ? player.alias : "Vacío", overall: player ? player.overall : null };
+      });
+  }
+  const team = state.league.teams[teamId];
+  return (team.lineupPreview || []).map((p) => ({
+    slotLabel: p.slotLabel,
+    alias: p.alias,
+    overall: p.overall,
+  }));
+}
+
+function teamFormationLabel(teamId) {
+  if (teamId === YOU_ID) return FORMATIONS[state.club.formation]?.label || state.club.formation;
+  const team = state.league.teams[teamId];
+  return team.formation ? FORMATIONS[team.formation]?.label || team.formation : "—";
+}
+
+function rivalLineupHTML(homeId, awayId) {
+  const side = (teamId) => `
+    <div class="rival-lineup-team">
+      <div class="rival-lineup-title">${state.league.teams[teamId].name} (${teamFormationLabel(teamId)})</div>
+      ${teamLineupList(teamId)
+        .map(
+          (p) => `<div class="rival-lineup-row"><span class="pos">${p.slotLabel}</span><span>${p.alias}</span><span class="ovr">${p.overall ?? "-"}</span></div>`
+        )
+        .join("")}
+    </div>`;
+  return `<div class="rival-lineup hidden">${side(homeId)}${side(awayId)}</div>`;
+}
+
 function renderNextFixtures() {
   const round = getNextMatchday(state.league);
   const container = $("next-fixtures");
@@ -470,12 +540,24 @@ function renderNextFixtures() {
 
   container.innerHTML = round
     .map(
-      (m) => `
-    <div class="fixture-row">
-      <div class="fixture-teams">${teamLabel(state.league, m.home)} vs ${teamLabel(state.league, m.away)}</div>
+      (m, i) => `
+    <div>
+      <div class="fixture-row">
+        <div class="fixture-teams">${teamLabel(state.league, m.home)} vs ${teamLabel(state.league, m.away)}</div>
+        <button class="lineup-toggle-btn" data-lineup-toggle="${i}">Ver alineaciones</button>
+      </div>
+      ${rivalLineupHTML(m.home, m.away)}
     </div>`
     )
     .join("");
+
+  container.querySelectorAll("[data-lineup-toggle]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const panel = btn.closest("div").nextElementSibling;
+      panel.classList.toggle("hidden");
+      btn.textContent = panel.classList.contains("hidden") ? "Ver alineaciones" : "Ocultar alineaciones";
+    });
+  });
 }
 
 $("simulate-matchday-btn").addEventListener("click", async () => {

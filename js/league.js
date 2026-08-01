@@ -3,8 +3,10 @@
 // ============================================================================
 
 import { db, doc, getDoc, setDoc, updateDoc } from "./firebase-config.js";
-import { CPU_TEAM_NAMES, generateCpuTeam } from "./players-seed.js";
+import { CPU_TEAM_NAMES } from "./players-seed.js";
 import { simulateMatch, simulateMatchScoreOnly } from "./simulation.js";
+import { fetchAllPlayers, assignFreeAgentsToCpuTeams } from "./market.js";
+import { FORMATIONS, autoPickLineup, computeTeamStrength, rosterToMap } from "./team.js";
 
 export const YOU_ID = "you";
 
@@ -52,14 +54,47 @@ function buildFixtures(teamIds) {
   }));
 }
 
-export async function createLeague(uid, clubName, clubStrengthFallback = 45) {
+export async function createLeague(uid, clubName) {
   const teams = {
     [YOU_ID]: { name: clubName, isCpu: false },
   };
   CPU_TEAM_NAMES.forEach((name, i) => {
-    const cpu = generateCpuTeam(name, i);
-    teams[`cpu${i}`] = { name: cpu.name, isCpu: true, strength: cpu.strength };
+    teams[`cpu${i}`] = { name, isCpu: true };
   });
+
+  // Los jugadores que nadie fichó todavía se reparten al azar (sin
+  // equilibrar) entre los 5 clubes CPU, así arrancan con plantel propio.
+  const cpuTeamsOnly = {};
+  CPU_TEAM_NAMES.forEach((name, i) => (cpuTeamsOnly[`cpu${i}`] = { name }));
+
+  const allPlayers = await fetchAllPlayers();
+  const freeAgents = allPlayers.filter((p) => !p.ownerId);
+  const assignment = await assignFreeAgentsToCpuTeams(freeAgents, cpuTeamsOnly);
+
+  const formationKeys = Object.keys(FORMATIONS);
+  for (const cpuId of Object.keys(cpuTeamsOnly)) {
+    const roster = assignment[cpuId] || [];
+    const formation = formationKeys[Math.floor(Math.random() * formationKeys.length)];
+    const { lineup, chosen } = autoPickLineup(formation, roster);
+    const rosterById = rosterToMap(roster);
+    const strength = computeTeamStrength(lineup, rosterById);
+
+    teams[cpuId] = {
+      ...teams[cpuId],
+      strength,
+      formation,
+      // "foto" de la alineación elegida, para poder mostrarla en el fixture
+      // sin tener que volver a leer la colección de jugadores.
+      lineupPreview: chosen.map((p) => ({
+        slotKey: p.slotKey,
+        slotLabel: p.slotLabel,
+        alias: p.alias,
+        position: p.position,
+        overall: p.overall,
+        rarity: p.rarity,
+      })),
+    };
+  }
 
   const teamIds = Object.keys(teams);
   const fixtures = buildFixtures(teamIds);

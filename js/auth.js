@@ -13,17 +13,19 @@ import {
   getDoc,
   serverTimestamp,
 } from "./firebase-config.js";
+import { getFormationSlots, DEFAULT_FORMATION } from "./team.js";
 
 export const STARTING_BUDGET = 200000;
 
-export const EMPTY_LINEUP = {
-  POR: null,
-  DEF1: null,
-  DEF2: null,
-  MED1: null,
-  MED2: null,
-  DEL: null,
-};
+// Arma un lineup vacío (todos los puestos en null) para una formación dada.
+export function buildEmptyLineup(formationKey) {
+  const lineup = {};
+  for (const slot of getFormationSlots(formationKey)) lineup[slot.key] = null;
+  return lineup;
+}
+
+// Retrocompatible: lineup vacío de la formación por defecto.
+export const EMPTY_LINEUP = buildEmptyLineup(DEFAULT_FORMATION);
 
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
@@ -47,7 +49,8 @@ export async function createClub(uid, email, clubName) {
     club: clubName,
     email: email || null,
     budget: STARTING_BUDGET,
-    lineup: EMPTY_LINEUP,
+    formation: DEFAULT_FORMATION,
+    lineup: buildEmptyLineup(DEFAULT_FORMATION),
     createdAt: serverTimestamp(),
   };
   await setDoc(doc(db, "clubs", uid), clubData);

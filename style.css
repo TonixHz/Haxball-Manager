@@ -703,6 +703,56 @@ table.league-table td.pts { font-family: var(--font-mono); color: var(--gold); f
   font-size: 13.5px;
 }
 
+.formation-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.formation-bar select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13.5px;
+}
+
+.lineup-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 12.5px;
+  text-decoration: underline;
+  padding: 0;
+}
+.rival-lineup {
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.rival-lineup-team {
+  margin-bottom: 8px;
+}
+.rival-lineup-team:last-child { margin-bottom: 0; }
+.rival-lineup-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 3px;
+}
+.rival-lineup-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+.rival-lineup-row .pos { color: var(--text-faint); width: 40px; flex-shrink: 0; }
+.rival-lineup-row .ovr { font-family: var(--font-mono); color: var(--text-dim); }
+
 .empty-state {
   text-align: center;
   padding: 50px 20px;
