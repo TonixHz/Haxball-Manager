@@ -13,6 +13,11 @@
 // así que solo tenés que tocar estos datos.
 // ============================================================================
 
+// Subí este número cada vez que cambies COMMUNITY_PLAYERS/DETAILED_PLAYERS
+// de forma importante: ensurePlayersSeeded() lo usa para darse cuenta de que
+// el mercado quedó desactualizado (con los "Jugador 00" viejos) y refrescarlo.
+export const SEED_VERSION = 2;
+
 export const RARITY_ORDER = ["bronce", "plata", "oro", "leyenda"];
 
 export const RARITY_COLORS = {

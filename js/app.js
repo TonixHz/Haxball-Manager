@@ -3,10 +3,10 @@
 // ============================================================================
 
 import { auth, onAuthStateChanged } from "./firebase-config.js";
-import { signInWithGoogle, logoutClub, getClubDoc, createClub, translateAuthError, buildEmptyLineup } from "./auth.js";
-import { ensurePlayersSeeded, fetchFreeAgents, fetchRoster, buyPlayer, sellPlayer, formatMoney } from "./market.js";
+import { signInWithGoogle, logoutClub, getClubDoc, createClub, translateAuthError, buildEmptyLineup, deleteClubDoc } from "./auth.js";
+import { ensurePlayersSeeded, fetchFreeAgents, fetchRoster, buyPlayer, sellPlayer, releaseRoster, formatMoney } from "./market.js";
 import { FORMATIONS, DEFAULT_FORMATION, getFormationSlots, assignSlot, clearSlot, saveLineup, saveFormation, computeTeamStrength, rosterToMap } from "./team.js";
-import { createLeague, getLeague, computeStandings, getNextMatchday, simulateCurrentMatchday, YOU_ID } from "./league.js";
+import { createLeague, getLeague, computeStandings, getNextMatchday, simulateCurrentMatchday, deleteLeague, YOU_ID } from "./league.js";
 import { RARITY_COLORS } from "./players-seed.js";
 
 // ----------------------------------------------------------------------------
@@ -72,6 +72,36 @@ $("setup-form").addEventListener("submit", async (e) => {
 });
 
 $("logout-btn").addEventListener("click", () => logoutClub());
+
+$("delete-career-btn").addEventListener("click", async () => {
+  if (!confirm("Esto borra tu club, tu plantilla y tu liga para empezar de cero. Los jugadores que tenías vuelven al mercado libre. ¿Seguro que querés borrar tu carrera?")) return;
+  if (!confirm("Es definitivo, no se puede deshacer. ¿Confirmás?")) return;
+
+  const btn = $("delete-career-btn");
+  btn.disabled = true;
+  try {
+    await releaseRoster(state.user.uid);
+    if (state.league) await deleteLeague(state.user.uid);
+    await deleteClubDoc(state.user.uid);
+
+    state.club = null;
+    state.roster = [];
+    state.rosterMap = {};
+    state.freeAgents = [];
+    state.league = null;
+    state.selectedSlot = null;
+    marketLoaded = false;
+
+    $("main-screen").classList.add("hidden");
+    $("setup-screen").classList.remove("hidden");
+    $("setup-club").value = "";
+    showToast("Carrera borrada. ¡Arrancá una nueva!");
+  } catch (err) {
+    showToast(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 onAuthStateChanged(auth, async (user) => {
   if (user) {

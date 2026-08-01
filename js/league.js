@@ -2,7 +2,7 @@
 // League — liga local (tu club + 5 CPU), calendario ida y vuelta
 // ============================================================================
 
-import { db, doc, getDoc, setDoc, updateDoc } from "./firebase-config.js";
+import { db, doc, getDoc, setDoc, updateDoc, deleteDoc } from "./firebase-config.js";
 import { CPU_TEAM_NAMES } from "./players-seed.js";
 import { simulateMatch, simulateMatchScoreOnly } from "./simulation.js";
 import { fetchAllPlayers, assignFreeAgentsToCpuTeams } from "./market.js";
@@ -113,6 +113,11 @@ export async function createLeague(uid, clubName) {
 export async function getLeague(uid) {
   const snap = await getDoc(doc(db, "leagues", uid));
   return snap.exists() ? snap.data() : null;
+}
+
+// Borra la liga del usuario (se usa al borrar la carrera para empezar de cero).
+export async function deleteLeague(uid) {
+  await deleteDoc(doc(db, "leagues", uid));
 }
 
 export function computeStandings(league) {

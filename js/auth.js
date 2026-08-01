@@ -11,6 +11,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  deleteDoc,
   serverTimestamp,
 } from "./firebase-config.js";
 import { getFormationSlots, DEFAULT_FORMATION } from "./team.js";
@@ -40,6 +41,11 @@ export async function logoutClub() {
 export async function getClubDoc(uid) {
   const snap = await getDoc(doc(db, "clubs", uid));
   return snap.exists() ? snap.data() : null;
+}
+
+// Borra el club del usuario (se usa al "borrar carrera y empezar de nuevo").
+export async function deleteClubDoc(uid) {
+  await deleteDoc(doc(db, "clubs", uid));
 }
 
 // Se llama la primera vez que un usuario nuevo entra con Google, para que

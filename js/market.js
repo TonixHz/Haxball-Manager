@@ -14,24 +14,38 @@ import {
   writeBatch,
   runTransaction,
 } from "./firebase-config.js";
-import { generatePlayerPool } from "./players-seed.js";
+import { generatePlayerPool, SEED_VERSION } from "./players-seed.js";
 
 const SELL_BACK_RATE = 0.65; // % del precio que recuperás al vender
 
 // ----------------------------------------------------------------------------
-// Siembra la colección "players" una sola vez (para todo el proyecto), usando
-// un doc de control en meta/players_seed para que no se dispare dos veces
-// aunque varios usuarios abran la app al mismo tiempo.
+// Siembra la colección "players" para todo el proyecto, usando un doc de
+// control en meta/players_seed con la versión de datos actual (SEED_VERSION
+// en players-seed.js). Si alguien cambia la lista de jugadores más adelante,
+// basta con subir SEED_VERSION: acá se detecta el desfasaje, se borran los
+// jugadores viejos que sigan libres (a nadie le tocan los que ya fichó) y
+// se cargan los nuevos, sin tener que borrar la base a mano.
 // ----------------------------------------------------------------------------
 export async function ensurePlayersSeeded() {
   const metaRef = doc(db, "meta", "players_seed");
   const metaSnap = await getDoc(metaRef);
-  if (metaSnap.exists()) return;
+  if (metaSnap.exists() && metaSnap.data().version === SEED_VERSION) return;
 
   try {
-    await setDoc(metaRef, { seeded: true, at: Date.now() });
+    await setDoc(metaRef, { seeded: true, version: SEED_VERSION, at: Date.now() });
   } catch (e) {
     return; // otro cliente ya está sembrando / no hay permisos, no pasa nada
+  }
+
+  // Los jugadores libres (que nadie fichó) de una siembra anterior quedan
+  // obsoletos y se borran; los que ya son de algún club (usuario o CPU) se
+  // dejan intactos para no romper ningún plantel existente.
+  const existingSnap = await getDocs(collection(db, "players"));
+  const staleFree = existingSnap.docs.filter((d) => !d.data().ownerId);
+  if (staleFree.length > 0) {
+    const deleteBatch = writeBatch(db);
+    staleFree.forEach((d) => deleteBatch.delete(d.ref));
+    await deleteBatch.commit();
   }
 
   const players = generatePlayerPool();
@@ -82,6 +96,20 @@ export async function fetchRoster(uid) {
   const q = query(collection(db, "players"), where("ownerId", "==", uid));
   const snap = await getDocs(q);
   return snap.docs.map((d) => d.data());
+}
+
+// ----------------------------------------------------------------------------
+// Al borrar una carrera, el plantel del usuario vuelve al mercado libre en
+// vez de perderse (así otro club los puede fichar más adelante).
+// ----------------------------------------------------------------------------
+export async function releaseRoster(uid) {
+  const roster = await fetchRoster(uid);
+  if (roster.length === 0) return;
+  const batch = writeBatch(db);
+  for (const p of roster) {
+    batch.update(doc(db, "players", p.id), { ownerId: null, ownerClub: null });
+  }
+  await batch.commit();
 }
 
 // ----------------------------------------------------------------------------
